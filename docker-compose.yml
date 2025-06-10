@@ -1,0 +1,134 @@
+version: '3.8'
+services:
+    flowkit-flowise:
+        container_name: flowise
+        image: flowiseai/flowise
+        restart: always
+        environment:
+            - PORT=${PORT}
+            - DATABASE_PATH=${DATABASE_PATH}
+            - DATABASE_TYPE=${DATABASE_TYPE}
+            - DATABASE_PORT=${DATABASE_PORT}
+            - DATABASE_HOST=${DATABASE_HOST}
+            - DATABASE_NAME=${DATABASE_NAME}
+            - DATABASE_USER=${DATABASE_USER}
+            - DATABASE_PASSWORD=${DATABASE_PASSWORD}
+            - SECRETKEY_PATH=${SECRETKEY_PATH}
+            - LOG_PATH=${LOG_PATH}
+        ports:
+            - '${PORT}:${PORT}'
+        volumes:
+            - flowise:/root/.flowise
+        depends_on:
+           flowkit-postgres:
+            condition: service_healthy
+        networks:
+            - flowkit-docker
+
+    flowkit-ollama:
+        container_name: flowkit-ollama
+        image: ollama/ollama:latest
+        pull_policy: always
+        tty: true
+        restart: always
+        #deploy:
+        #    resources:
+        #        reservations:
+        #            devices:
+        #              - driver: nvidia
+        #                count: 1
+        #               capabilities: [gpu]
+        environment:
+            - OLLAMA_KEEP_ALIVE=24h
+            - OLLAMA_HOST=0.0.0.0
+        volumes:
+            - .:/code
+            - ./ollama/ollama:/root/.ollama
+        ports:
+            - '${PORT_OLLAMA}:11434'
+        entrypoint: /bin/sh -c "ollama serve & sleep 5 && ollama pull llama3:8b && tail -f /dev/null"
+
+        networks:
+            - flowkit-docker
+
+    flowkit-webui:
+        container_name: flowkit-webui
+        image: ghcr.io/open-webui/open-webui:main
+        depends_on:
+            - flowkit-ollama
+        ports:
+            - '${PORT_WEBUI}:8080'
+        environment: # https://docs.openwebui.com/getting-started/env-configuration#default_models
+            - OLLAMA_BASE_URLS=${OLLAMA_BASE_URLS} #comma separated ollama hosts
+            - ENV=dev
+            - WEBUI_AUTH=${WEBUI_AUTH}
+            - WEBUI_NAME=${WEBUI_NAME}
+            - WEBUI_URL=${WEBUI_URL}
+            - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+        extra_hosts:
+            - host.docker.internal:host-gateway
+        volumes:
+            - ./ollama/flowkit-webui:/app/backend/data
+        restart: unless-stopped
+        networks:
+            - flowkit-docker
+
+    flowkit-langflow:
+        container_name: flowkit-langflow
+        image: langflowai/langflow:latest
+        ports:
+            - '${PORT_LANGF}:${PORT_LANGF}'
+        volumes:
+            - langflow_data:/data
+        extra_hosts:
+            - host.docker.internal:host-gateway
+        restart: unless-stopped
+        networks:
+            - flowkit-docker
+
+    flowkit-postgres:
+        image: postgres:15
+        container_name: flowkit-postgress
+        hostname: flowkit-db
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+        volumes:
+            - postgres_data:/var/lib/postgresql/data:rw
+        environment:
+            POSTGRES_DB: ${POSTGRES_DB}
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+        restart: always
+        ports:
+            - ${PORT_POSTGRES}:5432
+        networks:
+            - flowkit-docker
+
+    flowkit-mongodb:
+        container_name: flowkit-mongodb
+        image: mongo
+        restart: always
+        environment:
+            - AUTH=${AUTH}
+        ports:
+            - '${PORT_MONGO}:${PORT_MONGO}'
+        volumes:
+            - mongodb_data:/data/db
+        extra_hosts:
+            - host.docker.internal:host-gateway
+        networks:
+            - flowkit-docker
+
+volumes:
+  postgres_data:
+  flowise:
+  mongodb_data:
+  langflow_data:
+
+networks:
+    flowkit-docker:
+        driver: bridge
+  
